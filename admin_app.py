@@ -1,3 +1,4 @@
+from flask import render_template, make_response, abort
 from flask import make_response, abort
 import os, base64, json, re
 from flask import Flask, request, redirect, session, url_for, render_template_string, flash
@@ -23,8 +24,7 @@ PATH_WORKFLOW     = ".github/workflows/watchdog.yml"
 DIR_REPORTS       = "reports"
 
 # ====== APP ======
-app = Flask(__name__)
-app.secret_key = SECRET_KEY
+app = Flask(__name__, template_folder="web/templates", static_folder="web/static")app.secret_key = SECRET_KEY
 
 # ---------- GitHub helpers ----------
 def gh_headers():
@@ -62,6 +62,13 @@ def gh_list_dir(path):
         return []
     r.raise_for_status()
     return r.json()
+
+SAFE_NAME_RE = re.compile(r'^[\w\-.]+$')  # a-zA-Z0-9 _ - .
+def _safe_name(name: str) -> str:
+    if not SAFE_NAME_RE.match(name or ""):
+        abort(400)
+    return name
+
 
 # ---------- Auth ----------
 def logged_in():
@@ -218,51 +225,48 @@ def workflow():
 
 @app.route("/reports")
 def reports():
-    if not logged_in(): return redirect(url_for("login"))
+    if not logged_in(): 
+        return redirect(url_for("login"))
     files = gh_list_dir(DIR_REPORTS)
-    files = sorted([x for x in files if x["type"]=="file"], key=lambda x: x["name"], reverse=True)[:50]
-    return render_template_string(TEMPLATE_REPORTS, files=files, repo=GH_REPO, branch=GH_BRANCH)
+    files = sorted([x for x in files if x.get("type")=="file"], key=lambda x: x["name"], reverse=True)
+    return render_template("reports.html", files=files, repo=GH_REPO, branch=GH_BRANCH)
+
 
 @app.route("/report/<name>")
 def report_view(name):
     if not logged_in(): 
         return redirect(url_for("login"))
     name = _safe_name(name)
-
-    # διαβάζουμε το περιεχόμενο από το repo
     try:
         text, _ = gh_get_content(f"{DIR_REPORTS}/{name}")
     except Exception as e:
         flash(f"Σφάλμα ανάγνωσης: {e}")
         return redirect(url_for("reports"))
 
-    # HTML report -> εμφάνιση inline
+    # HTML → εμφάνιση με template
     if name.endswith(".html"):
         csv_guess = name.replace(".html", ".csv")
-        # έλεγχος αν υπάρχει και CSV δίπλα (προαιρετικός)
         has_csv = False
         try:
             _ = gh_get_content(f"{DIR_REPORTS}/{csv_guess}")
             has_csv = True
         except Exception:
             pass
-        return render_template_string(TEMPLATE_REPORT_VIEW,
-                                      title=name,
-                                      html=text,
-                                      csv_name=csv_guess if has_csv else None)
+        return render_template("report_view.html",
+                               title=name,
+                               html=text,
+                               csv_name=csv_guess if has_csv else None,
+                               repo=GH_REPO, branch=GH_BRANCH)
 
-    # Markdown -> απλή προεπισκόπηση (χωρίς επιπλέον libs)
+    # MD → απλή προεπισκόπηση (χωρίς markdown lib)
     if name.endswith(".md"):
-        safe = (
-            text.replace("&","&amp;")
-                .replace("<","&lt;")
-                .replace(">","&gt;")
-        )
-        return render_template_string(TEMPLATE_REPORT_MD,
-                                      title=name,
-                                      md_pre=safe)
+        safe = (text.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"))
+        return render_template("report_md.html",
+                               title=name,
+                               md_pre=safe,
+                               repo=GH_REPO, branch=GH_BRANCH)
 
-    # Άλλο τύπος (π.χ. .csv) -> κατέβασμα
+    # Άλλοι τύποι -> redirect για download
     return redirect(url_for("download_report", name=name))
 
 @app.route("/download/<name>")
@@ -275,7 +279,6 @@ def download_report(name):
     except Exception as e:
         return f"Σφάλμα: {e}", 500
 
-    # απλό guessing mime
     if name.endswith(".csv"):
         mime = "text/csv; charset=utf-8"
     elif name.endswith(".html"):
@@ -289,6 +292,7 @@ def download_report(name):
     resp.headers["Content-Type"] = mime
     resp.headers["Content-Disposition"] = f'attachment; filename="{name}"'
     return resp
+
 
 
 
@@ -425,6 +429,7 @@ TEMPLATE_REPORTS = TEMPLATE_BASE.replace("{{ body|safe }}", """
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+
 
 
 
