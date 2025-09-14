@@ -265,6 +265,32 @@ def report_view(name):
     # Άλλο τύπος (π.χ. .csv) -> κατέβασμα
     return redirect(url_for("download_report", name=name))
 
+@app.route("/download/<name>")
+def download_report(name):
+    if not logged_in(): 
+        return redirect(url_for("login"))
+    name = _safe_name(name)
+    try:
+        content, _ = gh_get_content(f"{DIR_REPORTS}/{name}")
+    except Exception as e:
+        return f"Σφάλμα: {e}", 500
+
+    # απλό guessing mime
+    if name.endswith(".csv"):
+        mime = "text/csv; charset=utf-8"
+    elif name.endswith(".html"):
+        mime = "text/html; charset=utf-8"
+    elif name.endswith(".md"):
+        mime = "text/markdown; charset=utf-8"
+    else:
+        mime = "application/octet-stream"
+
+    resp = make_response(content)
+    resp.headers["Content-Type"] = mime
+    resp.headers["Content-Disposition"] = f'attachment; filename="{name}"'
+    return resp
+
+
 
 SAFE_NAME_RE = re.compile(r'^[\w\-.]+$')  # a-zA-Z0-9 _ - .
 def _safe_name(name: str) -> str:
@@ -399,5 +425,6 @@ TEMPLATE_REPORTS = TEMPLATE_BASE.replace("{{ body|safe }}", """
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+
 
 
