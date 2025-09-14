@@ -223,6 +223,49 @@ def reports():
     files = sorted([x for x in files if x["type"]=="file"], key=lambda x: x["name"], reverse=True)[:50]
     return render_template_string(TEMPLATE_REPORTS, files=files, repo=GH_REPO, branch=GH_BRANCH)
 
+@app.route("/report/<name>")
+def report_view(name):
+    if not logged_in(): 
+        return redirect(url_for("login"))
+    name = _safe_name(name)
+
+    # διαβάζουμε το περιεχόμενο από το repo
+    try:
+        text, _ = gh_get_content(f"{DIR_REPORTS}/{name}")
+    except Exception as e:
+        flash(f"Σφάλμα ανάγνωσης: {e}")
+        return redirect(url_for("reports"))
+
+    # HTML report -> εμφάνιση inline
+    if name.endswith(".html"):
+        csv_guess = name.replace(".html", ".csv")
+        # έλεγχος αν υπάρχει και CSV δίπλα (προαιρετικός)
+        has_csv = False
+        try:
+            _ = gh_get_content(f"{DIR_REPORTS}/{csv_guess}")
+            has_csv = True
+        except Exception:
+            pass
+        return render_template_string(TEMPLATE_REPORT_VIEW,
+                                      title=name,
+                                      html=text,
+                                      csv_name=csv_guess if has_csv else None)
+
+    # Markdown -> απλή προεπισκόπηση (χωρίς επιπλέον libs)
+    if name.endswith(".md"):
+        safe = (
+            text.replace("&","&amp;")
+                .replace("<","&lt;")
+                .replace(">","&gt;")
+        )
+        return render_template_string(TEMPLATE_REPORT_MD,
+                                      title=name,
+                                      md_pre=safe)
+
+    # Άλλο τύπος (π.χ. .csv) -> κατέβασμα
+    return redirect(url_for("download_report", name=name))
+
+
 SAFE_NAME_RE = re.compile(r'^[\w\-.]+$')  # a-zA-Z0-9 _ - .
 def _safe_name(name: str) -> str:
     if not SAFE_NAME_RE.match(name or ""):
@@ -356,4 +399,5 @@ TEMPLATE_REPORTS = TEMPLATE_BASE.replace("{{ body|safe }}", """
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+
 
