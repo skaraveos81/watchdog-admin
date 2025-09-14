@@ -1,3 +1,4 @@
+from flask import make_response, abort
 import os, base64, json, re
 from flask import Flask, request, redirect, session, url_for, render_template_string, flash
 import requests
@@ -222,6 +223,12 @@ def reports():
     files = sorted([x for x in files if x["type"]=="file"], key=lambda x: x["name"], reverse=True)[:50]
     return render_template_string(TEMPLATE_REPORTS, files=files, repo=GH_REPO, branch=GH_BRANCH)
 
+SAFE_NAME_RE = re.compile(r'^[\w\-.]+$')  # a-zA-Z0-9 _ - .
+def _safe_name(name: str) -> str:
+    if not SAFE_NAME_RE.match(name or ""):
+        abort(400)  # απορρίπτει path traversal
+    return name
+
 # ---------- Templates ----------
 TEMPLATE_BASE = """
 <!doctype html>
@@ -349,3 +356,4 @@ TEMPLATE_REPORTS = TEMPLATE_BASE.replace("{{ body|safe }}", """
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+
